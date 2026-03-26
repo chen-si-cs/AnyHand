@@ -114,9 +114,8 @@ info "=== [4/5] Downloading AnyHand HaMeR checkpoint ==="
 CKPT_DIR="pretrained_models/hamer_ckpts/checkpoints"
 mkdir -p "$CKPT_DIR"
 
-# *** Replace <YOUR_HF_USERNAME> with your actual HuggingFace username ***
-HF_USER="<YOUR_HF_USERNAME>"
-HF_REPO="AnyHand"
+HF_USER="chen-si-02"
+HF_REPO="AnyHand-Models"
 HF_BASE="https://huggingface.co/${HF_USER}/${HF_REPO}/resolve/main"
 
 if [ "$HF_USER" = "<YOUR_HF_USERNAME>" ]; then

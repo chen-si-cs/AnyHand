@@ -6,14 +6,31 @@ Unified hand pose predictor that:
   2. Dispatches to either AnyHand-WiLoR or AnyHand-HaMeR (or both)
      for 3D reconstruction.
   3. Returns structured HandPrediction objects.
+  4. Optionally renders mesh overlays or saves per-hand .obj files.
 
 Usage
 -----
     from anyhand import AnyHandPredictor
 
-    # Single backend
+    # Basic prediction
     predictor = AnyHandPredictor(backend='wilor')
     hands = predictor.predict('image.jpg')
+
+    # Render mesh overlay on the image (returns BGR uint8 numpy array)
+    overlay = predictor.render_overlay('image.jpg', hands)
+    cv2.imwrite('out.jpg', overlay)
+
+    # Save per-hand .obj meshes to disk
+    saved = predictor.save_meshes(hands, out_dir='meshes', prefix='frame0')
+
+    # Project 3D vertices to 2D pixels (static helper)
+    import cv2, numpy as np
+    img = cv2.imread('image.jpg')
+    for hand in hands:
+        kpts2d = AnyHandPredictor.project_3d_to_2d(
+            hand.vertices, hand.cam_t, hand.focal_length,
+            img_size=(img.shape[1], img.shape[0]),
+        )
 
     # Both backends, on a batch of pre-loaded BGR arrays
     predictor = AnyHandPredictor(backend='both')
@@ -30,7 +47,7 @@ import sys
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Literal, Optional, Union
+from typing import List, Literal, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -41,6 +58,9 @@ import torch
 # ---------------------------------------------------------------------------
 _THIS_DIR  = Path(__file__).resolve().parent          # anyhand/
 _REPO_ROOT = _THIS_DIR.parent                         # AnyHand/
+
+# Default mesh colour matching WiLoR's demo (light purple, float RGB in [0,1])
+_LIGHT_PURPLE = (0.25098039, 0.274117647, 0.65882353)
 
 
 # ===========================================================================
@@ -60,8 +80,10 @@ class HandPrediction:
         MANO shape (beta) coefficients.
     vertices : (778, 3) float32
         MANO mesh vertices in camera-space metres.
+        NOTE: x-axis is already flipped for left hands so that all vertices
+        are in the canonical right-hand coordinate frame matching the renderer.
     keypoints_3d : (21, 3) float32
-        3D hand joints in camera-space metres.
+        3D hand joints in camera-space metres (same flip convention as vertices).
     keypoints_2d : (21, 2) float32
         2D hand joints in original image pixel coordinates.
     cam_t : (3,) float32
@@ -170,13 +192,15 @@ class AnyHandPredictor:
         self._hamer_ckpt  = hamer_ckpt  or self._DEFAULT_HAMER_CKPT
         self._detector_pt = detector_pt or self._DEFAULT_DETECTOR_PT
 
-        # ---- load components ----
-        self._load_detector()
-
+        # ---- internal state ----
         self._wilor_model     = None
         self._wilor_model_cfg = None
         self._hamer_model     = None
         self._hamer_model_cfg = None
+        self._renderer        = None   # lazy-loaded on first render call
+
+        # ---- load components ----
+        self._load_detector()
 
         if backend in ('wilor', 'both'):
             self._load_wilor()
@@ -189,7 +213,7 @@ class AnyHandPredictor:
 
     def _load_detector(self) -> None:
         """Load WiLoR's YOLO hand detector (used for all backends)."""
-        from ultralytics import YOLO  # installed as part of WiLoR deps
+        from ultralytics import YOLO
 
         _check_file(self._detector_pt,
                     "Hand detector not found. Run:  bash scripts/prepare_wilor.sh")
@@ -200,7 +224,7 @@ class AnyHandPredictor:
         _ensure_on_path(_REPO_ROOT / 'WiLoR',
                         "WiLoR submodule not found. Run:  bash scripts/prepare_wilor.sh")
         try:
-            from wilor.models.wilor import WiLoR  # noqa: F401 (import check)
+            from wilor.models.wilor import WiLoR  # noqa: F401
         except ImportError as exc:
             raise ImportError(
                 "WiLoR package is not installed. Run:  bash scripts/prepare_wilor.sh"
@@ -231,7 +255,7 @@ class AnyHandPredictor:
         _ensure_on_path(_REPO_ROOT / 'third_party' / 'hamer',
                         "HaMeR submodule not found. Run:  bash scripts/prepare_hamer.sh")
         try:
-            from hamer.models.hamer import HAMER  # noqa: F401 (import check)
+            from hamer.models.hamer import HAMER  # noqa: F401
         except ImportError as exc:
             raise ImportError(
                 "HaMeR package is not installed. Run:  bash scripts/prepare_hamer.sh"
@@ -240,8 +264,6 @@ class AnyHandPredictor:
         _check_file(self._hamer_ckpt,
                     "HaMeR checkpoint not found. Run:  bash scripts/prepare_hamer.sh")
 
-        # HaMeR's load_hamer() expects model_config.yaml in the SAME directory
-        # as the checkpoint (see prepare_hamer.sh which places it there).
         ckpt_dir    = Path(self._hamer_ckpt).parent
         hamer_cfg_p = ckpt_dir / 'model_config.yaml'
         _check_file(str(hamer_cfg_p),
@@ -263,6 +285,25 @@ class AnyHandPredictor:
         self._hamer_model     = model
         self._hamer_model_cfg = model_cfg
 
+    def _ensure_renderer(self) -> None:
+        """
+        Lazy-load WiLoR's pyrender-based Renderer on first use.
+        Requires WiLoR to be loaded (it provides the MANO face topology).
+        """
+        if self._renderer is not None:
+            return
+        if self._wilor_model is None:
+            raise RuntimeError(
+                "The renderer requires WiLoR to be loaded (it uses WiLoR's MANO face "
+                "topology). Re-instantiate with backend='wilor' or 'both', or pass "
+                "backend='wilor' to render_overlay() / save_meshes()."
+            )
+        from wilor.utils.renderer import Renderer
+        self._renderer = Renderer(
+            self._wilor_model_cfg,
+            faces=self._wilor_model.mano.faces,
+        )
+
     # ==================================================================
     # Detection
     # ==================================================================
@@ -270,7 +311,7 @@ class AnyHandPredictor:
     def _detect_hands(
         self,
         img_bgr: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Run the YOLO hand detector on a single BGR image.
 
@@ -408,7 +449,14 @@ class AnyHandPredictor:
                 batch = {k: v.to(self.device) for k, v in batch.items()}
                 out   = model(batch)
 
-                pred_cam      = out['pred_cam']           # (B, 3)  [s, tx, ty]
+                # ---- camera: flip tx for left hands ----
+                # demo.py lines 80-82: multiplier = (2*right-1); pred_cam[:,1] *= multiplier
+                # This mirrors the weak-perspective tx so that the mesh lands on
+                # the correct side of the image for left hands.
+                multiplier    = (2 * batch['right'] - 1).float()   # (B,) +1 or -1
+                pred_cam      = out['pred_cam'].clone()             # (B, 3)
+                pred_cam[:, 1] = multiplier * pred_cam[:, 1]
+
                 pred_verts    = out['pred_vertices']      # (B, 778, 3)
                 pred_kp3d     = out['pred_keypoints_3d']  # (B, 21,  3)
                 pred_kp2d     = out['pred_keypoints_2d']  # (B, 21,  2)  normalised crop
@@ -424,31 +472,41 @@ class AnyHandPredictor:
                 cam_t_full = _cam_crop_to_full(
                     pred_cam, box_center, box_size,
                     img_size, scaled_focal,
-                )  # (B, 3) on device
+                )  # (B, 3)
 
                 B = pred_cam.shape[0]
                 for i in range(B):
                     # ---- MANO pose: rot-mat → axis-angle ----
-                    # global_orient[i]: (1, 3, 3)  →  (3,)
-                    go_aa = _rotmat_to_aa(global_orient[i].cpu().numpy())     # (3,)
-                    # hand_pose[i]:     (15, 3, 3) →  (45,)
-                    hp_aa = _rotmat_to_aa(hand_pose[i].cpu().numpy())         # (45,)
-                    mano_pose_aa = np.concatenate([go_aa, hp_aa], axis=0)     # (48,)
+                    go_aa        = _rotmat_to_aa(global_orient[i].cpu().numpy())  # (3,)
+                    hp_aa        = _rotmat_to_aa(hand_pose[i].cpu().numpy())      # (45,)
+                    mano_pose_aa = np.concatenate([go_aa, hp_aa], axis=0)         # (48,)
+
+                    # ---- vertices & 3D joints: flip x for left hands ----
+                    # demo.py lines 99-101: verts[:,0] = (2*is_right-1)*verts[:,0]
+                    # Mirrors vertices into a canonical right-hand frame so that the
+                    # renderer (which always renders a right hand) produces correct output.
+                    is_right_i = float(batch['right'][i].item())
+                    flip        = float(2 * is_right_i - 1)          # +1 right, -1 left
+
+                    verts_np    = pred_verts[i].cpu().numpy().astype(np.float32)
+                    joints_np   = pred_kp3d[i].cpu().numpy().astype(np.float32)
+                    verts_np[:, 0]  = flip * verts_np[:, 0]
+                    joints_np[:, 0] = flip * joints_np[:, 0]
 
                     # ---- 2D keypoints: normalised crop → original pixels ----
-                    kp2d_norm = pred_kp2d[i].cpu().numpy()                    # (21, 2) in [-1,1]
+                    kp2d_norm = pred_kp2d[i].cpu().numpy()
                     kp2d_px   = _kp2d_crop_to_full(
                         kp2d_norm,
                         box_center[i].cpu().numpy(),
                         float(box_size[i].cpu()),
-                        model_size=int(batch['img'].shape[-1]),               # crop HxW (square)
-                    )  # (21, 2) in pixel coords
+                        model_size=int(batch['img'].shape[-1]),
+                    )
 
                     preds.append(HandPrediction(
                         mano_pose    = mano_pose_aa.astype(np.float32),
                         mano_shape   = betas[i].cpu().numpy().astype(np.float32),
-                        vertices     = pred_verts[i].cpu().numpy().astype(np.float32),
-                        keypoints_3d = pred_kp3d[i].cpu().numpy().astype(np.float32),
+                        vertices     = verts_np,
+                        keypoints_3d = joints_np,
                         keypoints_2d = kp2d_px.astype(np.float32),
                         cam_t        = cam_t_full[i].cpu().numpy().astype(np.float32),
                         focal_length = scaled_focal,
@@ -462,7 +520,7 @@ class AnyHandPredictor:
         return preds
 
     # ==================================================================
-    # Public API
+    # Public API — prediction
     # ==================================================================
 
     def predict(
@@ -490,11 +548,10 @@ class AnyHandPredictor:
         -----
         When backend='both', the result list contains predictions from WiLoR
         followed by predictions from HaMeR, sharing the same detected bboxes.
-        Each HandPrediction.backend field tells you which model produced it.
+        Each HandPrediction.backend tells you which model produced it.
         """
         backend = backend or self.backend
 
-        # Validate that the requested backend has been loaded
         if backend in ('wilor', 'both') and self._wilor_model is None:
             raise RuntimeError(
                 "WiLoR model not loaded. Re-instantiate with backend='wilor' or 'both'."
@@ -513,7 +570,6 @@ class AnyHandPredictor:
         image: Union[np.ndarray, str],
         backend: str,
     ) -> List[HandPrediction]:
-        # ---- load image ----
         if isinstance(image, (str, Path)):
             img_bgr = cv2.imread(str(image))
             if img_bgr is None:
@@ -524,16 +580,12 @@ class AnyHandPredictor:
             raise TypeError(f"image must be str, Path, or np.ndarray. Got {type(image)}")
 
         if img_bgr.ndim != 3 or img_bgr.shape[2] != 3:
-            raise ValueError(
-                f"Expected a (H, W, 3) BGR array. Got shape: {img_bgr.shape}"
-            )
+            raise ValueError(f"Expected (H, W, 3) BGR array. Got shape: {img_bgr.shape}")
 
-        # ---- detect hands ----
         boxes, is_right, scores = self._detect_hands(img_bgr)
         if len(boxes) == 0:
             return []
 
-        # ---- reconstruct ----
         results: List[HandPrediction] = []
         if backend in ('wilor', 'both'):
             results += self._run_wilor(img_bgr, boxes, is_right, scores)
@@ -542,9 +594,207 @@ class AnyHandPredictor:
 
         return results
 
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # Public API — visualisation
+    # ==================================================================
+
+    def render_overlay(
+        self,
+        image: Union[np.ndarray, str],
+        hands: List[HandPrediction],
+        mesh_color: Tuple[float, float, float] = _LIGHT_PURPLE,
+        bg_color: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+    ) -> np.ndarray:
+        """
+        Render MANO mesh overlays for all detected hands onto the input image.
+
+        Uses WiLoR's pyrender-based Renderer. The Renderer is lazy-loaded on
+        the first call and cached for subsequent calls.
+
+        Parameters
+        ----------
+        image : np.ndarray (H, W, 3) BGR  |  str filepath
+            The original input image.
+        hands : List[HandPrediction]
+            Output of predict().  Can be empty — returns the original image.
+        mesh_color : (R, G, B) float tuple in [0, 1]
+            Colour of the rendered mesh faces. Default is WiLoR's light purple.
+        bg_color : (R, G, B) float tuple in [0, 1]
+            Background colour for the renderer scene.
+
+        Returns
+        -------
+        np.ndarray  (H, W, 3)  uint8  BGR
+            Image with mesh overlaid via alpha compositing.
+
+        Example
+        -------
+        >>> overlay = predictor.render_overlay('photo.jpg', hands)
+        >>> cv2.imwrite('out.jpg', overlay)
+        """
+        # ---- load image ----
+        if isinstance(image, (str, Path)):
+            img_bgr = cv2.imread(str(image))
+            if img_bgr is None:
+                raise FileNotFoundError(f"Could not read image: {image}")
+        else:
+            img_bgr = image
+
+        if not hands:
+            return img_bgr.copy()
+
+        self._ensure_renderer()
+
+        H, W  = img_bgr.shape[:2]
+        img_size = torch.tensor([W, H], dtype=torch.float32)
+
+        # Collect per-hand data — renderer expects lists
+        all_verts   = [h.vertices  for h in hands]
+        all_cam_t   = [h.cam_t     for h in hands]
+        all_is_right = [h.is_right for h in hands]
+
+        # focal_length may differ per hand (e.g. if images differ in size);
+        # use the first hand's value — they're all computed from the same image.
+        focal_length = hands[0].focal_length
+
+        misc_args = dict(
+            mesh_base_color = mesh_color,
+            scene_bg_color  = bg_color,
+            focal_length    = focal_length,
+        )
+
+        # render_rgba_multiple returns (H, W, 4) float32 RGBA in [0, 1]
+        cam_view = self._renderer.render_rgba_multiple(
+            all_verts,
+            cam_t      = all_cam_t,
+            render_res = img_size,
+            is_right   = all_is_right,
+            **misc_args,
+        )
+
+        # Alpha-composite mesh over original image (RGB space)
+        # demo.py lines 128-130
+        img_rgb = img_bgr[:, :, ::-1].astype(np.float32) / 255.0   # BGR→RGB, [0,1]
+        alpha   = cam_view[:, :, 3:]                                 # (H, W, 1)
+        overlay = img_rgb * (1 - alpha) + cam_view[:, :, :3] * alpha
+
+        # Return BGR uint8 to stay consistent with OpenCV conventions
+        return (overlay[:, :, ::-1] * 255).clip(0, 255).astype(np.uint8)
+
+    def save_meshes(
+        self,
+        hands: List[HandPrediction],
+        out_dir: str,
+        prefix: str = 'hand',
+        mesh_color: Tuple[float, float, float] = _LIGHT_PURPLE,
+    ) -> List[str]:
+        """
+        Save each detected hand mesh as a separate .obj file.
+
+        Uses WiLoR's Renderer.vertices_to_trimesh() internally, so the
+        exported meshes include vertex colours.
+
+        Parameters
+        ----------
+        hands : List[HandPrediction]
+            Output of predict().
+        out_dir : str
+            Directory where .obj files will be written (created if needed).
+        prefix : str
+            Filename prefix.  Files are named  <prefix>_<n>.obj
+            where n is the 0-based hand index.
+        mesh_color : (R, G, B) float tuple in [0, 1]
+            Vertex colour for the mesh.
+
+        Returns
+        -------
+        List[str]
+            Absolute paths of every saved .obj file.
+
+        Example
+        -------
+        >>> paths = predictor.save_meshes(hands, 'out/meshes', prefix='frame0042')
+        >>> print(paths)
+        ['out/meshes/frame0042_0.obj', 'out/meshes/frame0042_1.obj']
+        """
+        if not hands:
+            return []
+
+        self._ensure_renderer()
+        os.makedirs(out_dir, exist_ok=True)
+
+        saved_paths: List[str] = []
+        for n, hand in enumerate(hands):
+            out_path = os.path.join(out_dir, f'{prefix}_{n}.obj')
+            tmesh = self._renderer.vertices_to_trimesh(
+                hand.vertices,
+                hand.cam_t.copy(),
+                mesh_color,
+                is_right=hand.is_right,
+            )
+            tmesh.export(out_path)
+            saved_paths.append(os.path.abspath(out_path))
+
+        return saved_paths
+
+    # ==================================================================
+    # Public API — static geometry helpers
+    # ==================================================================
+
+    @staticmethod
+    def project_3d_to_2d(
+        points: np.ndarray,
+        cam_t: np.ndarray,
+        focal_length: float,
+        img_size: Tuple[int, int],
+    ) -> np.ndarray:
+        """
+        Project 3D camera-space points onto the full image plane.
+
+        Implements the standard pinhole projection with principal point at
+        the image centre, matching demo.py's project_full_img().
+
+        Parameters
+        ----------
+        points : (N, 3) float32
+            3D points in camera space (e.g. hand.vertices or hand.keypoints_3d).
+        cam_t : (3,) float32
+            Camera translation from HandPrediction.cam_t.
+        focal_length : float
+            Focal length in pixels from HandPrediction.focal_length.
+        img_size : (W, H) int tuple
+            Width and height of the original image in pixels.
+
+        Returns
+        -------
+        np.ndarray  (N, 2)  float32
+            2D pixel coordinates in the original image.
+
+        Example
+        -------
+        >>> kpts2d = AnyHandPredictor.project_3d_to_2d(
+        ...     hand.vertices, hand.cam_t, hand.focal_length,
+        ...     img_size=(img.shape[1], img.shape[0]),
+        ... )
+        """
+        W, H = img_size
+        cx, cy = W / 2.0, H / 2.0
+
+        # Translate into camera frame
+        pts = points + cam_t[None, :]            # (N, 3)
+
+        # Perspective division
+        pts_norm = pts / pts[:, 2:3]             # (N, 3), z=1
+
+        # Apply intrinsic matrix  K = diag(f, f, 1) with principal point (cx, cy)
+        u = focal_length * pts_norm[:, 0] + cx   # (N,)
+        v = focal_length * pts_norm[:, 1] + cy   # (N,)
+
+        return np.stack([u, v], axis=1).astype(np.float32)  # (N, 2)
+
+    # ==================================================================
     # Convenience properties
-    # ------------------------------------------------------------------
+    # ==================================================================
 
     @property
     def is_wilor_loaded(self) -> bool:
@@ -573,13 +823,12 @@ def _cam_crop_to_full(
     pred_cam: torch.Tensor,    # (B, 3)  [s, tx_crop, ty_crop]
     box_center: torch.Tensor,  # (B, 2)  [cx, cy] in pixels
     box_size: torch.Tensor,    # (B,)    square crop size in pixels
-    img_size: torch.Tensor,    # (2,)    [W, H] in pixels  (or on same device)
+    img_size: torch.Tensor,    # (2,)    [W, H] in pixels
     focal_length: float,
 ) -> torch.Tensor:             # (B, 3)  [tx, ty, tz] camera-space metres
     """
     Convert weak-perspective camera parameters from crop space to the
-    full-image camera translation vector, following the same formula
-    used internally by WiLoR and HaMeR.
+    full-image camera translation vector.
 
     The weak-perspective model: x_img = f * (x_cam / z_cam)
     Given predicted [s, tx, ty] relative to the crop:
@@ -587,80 +836,45 @@ def _cam_crop_to_full(
         tx = tx_crop + (cx_box - cx_img) * 2 / (s * crop_size)
         ty = ty_crop + (cy_box - cy_img) * 2 / (s * crop_size)
     """
-    s        = pred_cam[:, 0]           # (B,)
-    tx_crop  = pred_cam[:, 1]           # (B,)
-    ty_crop  = pred_cam[:, 2]           # (B,)
-
-    cx_box   = box_center[:, 0]         # (B,)
-    cy_box   = box_center[:, 1]         # (B,)
-
-    # image centre (broadcast-friendly scalar)
-    cx_img   = img_size[0] * 0.5
-    cy_img   = img_size[1] * 0.5
-
-    denom    = s * box_size + 1e-9      # (B,)  avoid division by zero
-
-    tz       = 2.0 * focal_length / denom
-    tx       = tx_crop + 2.0 * (cx_box - cx_img) / denom
-    ty       = ty_crop + 2.0 * (cy_box - cy_img) / denom
-
-    return torch.stack([tx, ty, tz], dim=1)  # (B, 3)
+    s       = pred_cam[:, 0]
+    tx_crop = pred_cam[:, 1]
+    ty_crop = pred_cam[:, 2]
+    cx_box  = box_center[:, 0]
+    cy_box  = box_center[:, 1]
+    cx_img  = img_size[0] * 0.5
+    cy_img  = img_size[1] * 0.5
+    denom   = s * box_size + 1e-9
+    tz      = 2.0 * focal_length / denom
+    tx      = tx_crop + 2.0 * (cx_box - cx_img) / denom
+    ty      = ty_crop + 2.0 * (cy_box - cy_img) / denom
+    return torch.stack([tx, ty, tz], dim=1)
 
 
 def _rotmat_to_aa(rotmat: np.ndarray) -> np.ndarray:
     """
-    Convert rotation matrix (or stack of matrices) to axis-angle vectors.
-
-    Parameters
-    ----------
-    rotmat : (..., 3, 3)
-
-    Returns
-    -------
-    np.ndarray  shape (..., 3) flattened to 1-D
-        e.g. (1, 3, 3) → (3,),  (15, 3, 3) → (45,)
+    Convert rotation matrix (or stack) to axis-angle vectors, flattened.
+    (..., 3, 3)  →  (N*3,)
     """
     from scipy.spatial.transform import Rotation
 
-    shape   = rotmat.shape
-    n_rots  = int(np.prod(shape[:-2]))                 # total number of matrices
-    mats    = rotmat.reshape(n_rots, 3, 3)
-
-    # Ensure valid rotation matrices (orthonormalise via SVD for robustness)
+    n_rots   = int(np.prod(rotmat.shape[:-2]))
+    mats     = rotmat.reshape(n_rots, 3, 3)
     U, _, Vt = np.linalg.svd(mats)
     mats_orth = U @ Vt
-    # Fix reflections: det should be +1
-    det_sign = np.linalg.det(mats_orth)[:, None, None]
+    det_sign  = np.linalg.det(mats_orth)[:, None, None]
     mats_orth[:, :, 2:] *= np.sign(det_sign)
-
-    aa = Rotation.from_matrix(mats_orth).as_rotvec().astype(np.float32)  # (N, 3)
-    return aa.reshape(-1)   # flatten: (N*3,)
+    return Rotation.from_matrix(mats_orth).as_rotvec().astype(np.float32).reshape(-1)
 
 
 def _kp2d_crop_to_full(
-    kp2d_norm: np.ndarray,   # (21, 2) normalised in [-1, 1] (crop space)
-    box_center: np.ndarray,  # (2,)  [cx, cy] in pixels
-    box_size: float,         # scalar  crop size in pixels (square)
-    model_size: int = 256,   # the ViT input resolution (typically 256)
-) -> np.ndarray:             # (21, 2) pixel coords in original image
-    """
-    Map 2D keypoints from the model's normalised crop space back to
-    pixel coordinates in the original (full) image.
-
-    Both WiLoR and HaMeR normalise the crop to [-1, 1] before passing
-    it into the ViT backbone, so this inverse mapping is:
-        kp_px  = (kp_norm + 1) / 2 * model_size        # px in [0, model_size]
-        kp_img = kp_px * (box_size / model_size) + (box_center - box_size / 2)
-    which simplifies to:
-        kp_img = (kp_norm + 1) / 2 * box_size + (box_center - box_size / 2)
-    """
-    # From [-1,1] to fraction of crop [0,1], then scale to crop pixel size
-    kp = (kp2d_norm + 1.0) * 0.5 * box_size          # (21, 2) in crop pixels
-
-    # Shift from crop-local to image-global
+    kp2d_norm: np.ndarray,   # (21, 2) in [-1, 1]
+    box_center: np.ndarray,  # (2,)
+    box_size: float,
+    model_size: int = 256,
+) -> np.ndarray:             # (21, 2) pixel coords
+    kp = (kp2d_norm + 1.0) * 0.5 * box_size
     kp[:, 0] += box_center[0] - box_size * 0.5
     kp[:, 1] += box_center[1] - box_size * 0.5
-
     return kp.astype(np.float32)
 
 
@@ -669,24 +883,16 @@ def _kp2d_crop_to_full(
 # ===========================================================================
 
 def _check_file(path: str, hint: str) -> None:
-    """Raise FileNotFoundError with a helpful message if path doesn't exist."""
     if not os.path.isfile(path):
         raise FileNotFoundError(
-            f"Required file not found: {path}\n"
-            f"  → {hint}"
+            f"Required file not found: {path}\n  → {hint}"
         )
 
 
 def _ensure_on_path(pkg_dir: Path, hint: str) -> None:
-    """
-    Ensure that a source-installed package directory is on sys.path so that
-    its top-level package can be imported.  If the directory doesn't exist,
-    raises an informative ImportError.
-    """
     if not pkg_dir.exists():
         raise ImportError(
-            f"Package directory not found: {pkg_dir}\n"
-            f"  → {hint}"
+            f"Package directory not found: {pkg_dir}\n  → {hint}"
         )
     src = str(pkg_dir)
     if src not in sys.path:

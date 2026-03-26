@@ -27,8 +27,9 @@ This repository releases **fine-tuned checkpoints of [HaMeR](https://arxiv.org/a
 | Component | Status |
 |---|---|
 | **Fine-tuned HaMeR & WiLoR checkpoints** + unified `AnyHandPredictor` | ✅ Released |
-| **AnyHandNet-D** (RGB-D hand pose estimation with depth fusion module) | 🔜 Coming soon |
-| **AnyHand generation pipeline** (full dataset & training code) | 🔜 Coming soon |
+| **AnyHandNet-D**  | 🔜 Coming soon |
+| **AnyHand generation pipeline** | 🔜 Coming soon |
+| **AnyHand dataset** | 🔜 Coming soon |
 
 ---
 
@@ -117,65 +118,104 @@ pretrained_models/
 
 ### 1.5 Run Inference — Unified Predictor
 
-We provide `AnyHandPredictor`, a single class that wraps both models behind
-one consistent API. It always uses WiLoR's YOLO hand detector for bbox
-detection, then dispatches to whichever reconstruction backbone you choose.
+We provide `AnyHandPredictor`, a single class that wraps both models behind one consistent API. It always uses WiLoR's YOLO hand detector for bbox detection, then dispatches to whichever reconstruction backbone you choose.
 
-**Python API** 
-```{python}
+**Predict**
+
+```python
 from anyhand import AnyHandPredictor
 
-# --- WiLoR backend (default, faster) ---
+# WiLoR backend (default)
 predictor = AnyHandPredictor(backend='wilor')
 hands = predictor.predict('path/to/image.jpg')
 
 for hand in hands:
     print(f"{'Right' if hand.is_right else 'Left'} hand  score={hand.score:.2f}")
-    print(f"  MANO pose  : {hand.mano_pose.shape}")   # (48,)
-    print(f"  MANO shape : {hand.mano_shape.shape}")  # (10,)
-    print(f"  Vertices   : {hand.vertices.shape}")    # (778, 3)
-    print(f"  Keypoints3D: {hand.keypoints_3d.shape}")# (21,  3)
-    print(f"  Keypoints2D: {hand.keypoints_2d.shape}")# (21,  2)  pixels
-    print(f"  Cam transl : {hand.cam_t}")             # (3,)
+    print(f"  MANO pose  : {hand.mano_pose.shape}")    # (48,)
+    print(f"  MANO shape : {hand.mano_shape.shape}")   # (10,)
+    print(f"  Vertices   : {hand.vertices.shape}")     # (778, 3)
+    print(f"  Keypoints3D: {hand.keypoints_3d.shape}") # (21, 3)
+    print(f"  Keypoints2D: {hand.keypoints_2d.shape}") # (21, 2)
+    print(f"  Cam translation : {hand.cam_t}")              # (3,)
 
-# --- HaMeR backend ---
+# HaMeR backend
 predictor = AnyHandPredictor(backend='hamer')
 hands = predictor.predict('path/to/image.jpg')
 
-# --- Both at once (same bboxes, two sets of predictions) ---
+# Both at once — same bboxes, two sets of predictions
+# hand.backend == 'wilor' or 'hamer' tells you which is which
 predictor = AnyHandPredictor(backend='both')
 hands = predictor.predict('path/to/image.jpg')
-# hands contains WiLoR predictions followed by HaMeR predictions;
-# hand.backend == 'wilor' or 'hamer' tells you which is which.
 
-# --- Batch of images ---
+# Batch of images
 import cv2
 imgs = [cv2.imread(p) for p in ['img1.jpg', 'img2.jpg']]
-batch_results = predictor.predict(imgs)   # List[List[HandPrediction]]
+batch_results = predictor.predict(imgs)  # List[List[HandPrediction]]
 
-# --- Override backend per call ---
-hands_w = predictor.predict(img, backend='wilor')
-hands_h = predictor.predict(img, backend='hamer')
+# Override backend per call
+hands = predictor.predict('photo.jpg', backend='wilor')
+```
+
+**Render mesh overlay**
+
+```python
+# Renders all detected hand meshes overlaid on the image.
+# Returns a BGR uint8 numpy array ready for cv2.imwrite().
+overlay = predictor.render_overlay('photo.jpg', hands)
+cv2.imwrite('out.jpg', overlay)
+
+# Custom mesh colour (float RGB in [0, 1])
+overlay = predictor.render_overlay('photo.jpg', hands, mesh_color=(0.9, 0.4, 0.2))
+```
+
+**Save per-hand .obj meshes**
+
+```python
+# Saves <prefix>_0.obj, <prefix>_1.obj, … into out_dir/.
+# Returns the list of absolute paths written.
+paths = predictor.save_meshes(hands, out_dir='out/meshes', prefix='frame0042')
+print(paths)
+# ['…/out/meshes/frame0042_0.obj', '…/out/meshes/frame0042_1.obj']
+```
+
+**Project 3D points to 2D pixels**
+
+```python
+img = cv2.imread('photo.jpg')
+
+for hand in hands:
+    # Works on vertices (778, 3) or keypoints (21, 3) — any (N, 3) array
+    kpts_2d = AnyHandPredictor.project_3d_to_2d(
+        hand.keypoints_3d,
+        hand.cam_t,
+        hand.focal_length,
+        img_size=(img.shape[1], img.shape[0]),
+    )  # (21, 2) float32 pixel coordinates
+
+    for x, y in kpts_2d.astype(int):
+        cv2.circle(img, (x, y), 4, (0, 255, 0), -1)
+
+cv2.imwrite('keypoints.jpg', img)
 ```
 
 **Custom checkpoint paths**
 
-```
+```python
 predictor = AnyHandPredictor(
-    backend      = 'wilor',
-    wilor_ckpt   = '/path/to/my.ckpt',
-    wilor_cfg    = '/path/to/model_config.yaml',
-    detector_pt  = '/path/to/detector.pt',
-    device       = 'cuda:0',
-    det_conf     = 0.4,    # YOLO detection confidence threshold
-    rescale_factor = 2.0,  # bbox padding factor
-    batch_size   = 32,
+    backend        = 'wilor',
+    wilor_ckpt     = '/path/to/anyhand_wilor.ckpt',
+    wilor_cfg      = '/path/to/model_config_wilor.yaml',
+    detector_pt    = '/path/to/detector.pt',
+    device         = 'cuda:0',
+    det_conf       = 0.4,   # YOLO detection confidence threshold
+    rescale_factor = 2.0,   # bbox padding factor
+    batch_size     = 32,
 )
 ```
 
-**Command-line demo (WiLoR's original demo, with AnyHand checkpoint)**
+**Command-line demo (WiLoR's original script, with AnyHand checkpoint)**
 
-```
+```bash
 python WiLoR/demo.py \
     --img_folder demo_img \
     --out_folder demo_out \
@@ -183,20 +223,26 @@ python WiLoR/demo.py \
     --cfg        pretrained_models/model_config_wilor.yaml \
     --save_mesh
 ```
+
 ---
 
 ## Part 2 — RGB-D Hand Pose Estimation (AnyHandNet-D) 🔜
 
-> **Coming soon.** We will release AnyHandNet-D, a lightweight depth fusion module that integrates into existing RGB-based models. Trained with AnyHand's aligned RGB-D data, it achieves superior performance on HO-3D without any fine-tuning on target data.
+> **Coming soon.** 
 
 ---
 
 ## Part 3 — AnyHand Generation Pipeline 🔜
 
-> **Coming soon.** We will release the full AnyHand dataset, generation pipeline, and training code. The dataset includes 2.5M single-hand and 4.1M hand-object interaction images rendered with diverse hand poses, skin textures, lighting conditions, and backgrounds.
+> **Coming soon.** 
 
 ---
 
+## Part 4 — AnyHand Dataset 🔜
+
+> **Coming soon.** 
+
+---
 
 ---
 

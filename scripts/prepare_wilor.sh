@@ -82,9 +82,8 @@ info "=== [3/4] Downloading AnyHand WiLoR checkpoint ==="
 
 mkdir -p pretrained_models
 
-# *** Replace <YOUR_HF_USERNAME> with your actual HuggingFace username ***
-HF_USER="<YOUR_HF_USERNAME>"
-HF_REPO="AnyHand"
+HF_USER="chen-si-02"
+HF_REPO="AnyHand-Models"
 HF_BASE="https://huggingface.co/${HF_USER}/${HF_REPO}/resolve/main"
 
 if [ "$HF_USER" = "<YOUR_HF_USERNAME>" ]; then
