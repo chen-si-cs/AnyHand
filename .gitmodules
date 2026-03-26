@@ -1,0 +1,3 @@
+[submodule "WiLoR"]
+	path = WiLoR
+	url = https://github.com/rolpotamias/WiLoR.git
