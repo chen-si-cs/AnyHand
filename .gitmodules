@@ -1,3 +1,6 @@
 [submodule "WiLoR"]
 	path = WiLoR
 	url = https://github.com/rolpotamias/WiLoR.git
+[submodule "HaMeR"]
+	path = HaMeR
+	url = https://github.com/geopavlakos/hamer.git
