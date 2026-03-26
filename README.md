@@ -26,7 +26,7 @@ This repository releases **fine-tuned checkpoints of [HaMeR](https://arxiv.org/a
 
 | Component | Status |
 |---|---|
-| **Fine-tuned HaMeR & WiLoR checkpoints** (RGB hand pose estimation) | ✅ Released |
+| **Fine-tuned HaMeR & WiLoR checkpoints** + unified `AnyHandPredictor` | ✅ Released |
 | **AnyHandNet-D** (RGB-D hand pose estimation with depth fusion module) | 🔜 Coming soon |
 | **AnyHand generation pipeline** (full dataset & training code) | 🔜 Coming soon |
 
@@ -36,9 +36,9 @@ This repository releases **fine-tuned checkpoints of [HaMeR](https://arxiv.org/a
 
 We release improved checkpoints for both [HaMeR](https://github.com/geopavlakos/hamer) and [WiLoR](https://github.com/rolpotamias/WiLoR), co-trained with AnyHand. These are **drop-in replacements** for the original checkpoints — no architecture changes are needed.
 
-### 1.1 Clone This Repo (with WiLoR Submodule)
+### 1.1 Clone This Repo (with Submodules)
 
-The WiLoR codebase is included as a git submodule.
+Both WiLoR and HaMeR are included as git submodules.
 
 ```bash
 git clone --recurse-submodules https://github.com/chen-si-cs/AnyHand.git
@@ -50,6 +50,8 @@ If you already cloned without `--recurse-submodules`:
 ```bash
 git submodule update --init --recursive
 ```
+
+This populates WiLoR/ (WiLoR codebase) and third_party/hamer/ (HaMeR codebase).
 
 ### 1.2 Install Dependencies
 
@@ -64,11 +66,24 @@ Install PyTorch (adjust CUDA version — see [pytorch.org](https://pytorch.org/g
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 ```
 
-Install WiLoR's dependencies:
-
-```bash
-pip install -r WiLoR/requirements.txt
+Then run the preparation scripts for whichever backend(s) you need:
+**WiLoR only** (recommended for most users):
 ```
+bash scripts/prepare_wilor.sh
+```
+
+**HaMeR only**:
+```
+bash scripts/prepare_hamer.sh
+```
+
+**Both**:
+```
+bash scripts/prepare_wilor.sh
+bash scripts/prepare_hamer.sh
+```
+Each script installs the corresponding Python package, downloads the
+AnyHand checkpoint, and prints a checklist of remaining manual steps.
 
 ### 1.3 Set Up MANO
 
@@ -85,92 +100,89 @@ AnyHand/
 
 > **Note:** By using MANO, you agree to the [MANO license terms](https://mano.is.tue.mpg.de/license.html).
 
-### 1.4 Download AnyHand Checkpoints
-
-The improved checkpoints and matching model configs are hosted on HuggingFace.
-
-#### Option A — `wget` (quick)
-
-```bash
-mkdir -p pretrained_models
-
-# AnyHand fine-tuned WiLoR checkpoint
-wget https://huggingface.co/<YOUR_HF_USERNAME>/AnyHand/resolve/main/anyhand_wilor.ckpt \
-     -O pretrained_models/anyhand_wilor.ckpt
-
-# Matching WiLoR model config
-wget https://huggingface.co/<YOUR_HF_USERNAME>/AnyHand/resolve/main/model_config.yaml \
-     -O pretrained_models/model_config.yaml
-
-# Hand detector (unchanged from original WiLoR)
-wget https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main/pretrained_models/detector.pt \
-     -O pretrained_models/detector.pt
-```
-
-#### Option B — `huggingface_hub` (Python, handles large files & retries)
-
-```bash
-pip install huggingface_hub
-```
-
-```python
-from huggingface_hub import hf_hub_download
-import shutil, os
-
-os.makedirs("pretrained_models", exist_ok=True)
-
-for filename in ["anyhand_wilor.ckpt", "model_config.yaml"]:
-    path = hf_hub_download(
-        repo_id="<YOUR_HF_USERNAME>/AnyHand",
-        filename=filename,
-    )
-    shutil.copy(path, f"pretrained_models/{filename}")
-```
-
-After downloading, `pretrained_models/` should look like:
-
+### 1.4 Download Checkpoints
+The prepare scripts above handle this automatically once you fill in
+your HuggingFace username. See the scripts for manual `wget` alternatives.
+After running, your layout will be:
 ```
 pretrained_models/
-├── anyhand_wilor.ckpt   ← AnyHand fine-tuned WiLoR checkpoint
-├── model_config.yaml    ← matching model config
-└── detector.pt          ← hand detector (from original WiLoR)
+├── anyhand_wilor.ckpt          ← AnyHand fine-tuned WiLoR
+├── model_config_wilor.yaml     ← WiLoR config
+├── detector.pt                 ← YOLO hand detector (shared by both)
+└── hamer_ckpts/
+    └── checkpoints/
+        ├── anyhand_hamer.ckpt  ← AnyHand fine-tuned HaMeR
+        └── model_config.yaml   ← HaMeR config
 ```
 
-### 1.5 Run Inference
+### 1.5 Run Inference — Unified Predictor
 
-#### Demo on a folder of images
+We provide `AnyHandPredictor`, a single class that wraps both models behind
+one consistent API. It always uses WiLoR's YOLO hand detector for bbox
+detection, then dispatches to whichever reconstruction backbone you choose.
 
-```bash
+**Python API** 
+```{python}
+from anyhand import AnyHandPredictor
+
+# --- WiLoR backend (default, faster) ---
+predictor = AnyHandPredictor(backend='wilor')
+hands = predictor.predict('path/to/image.jpg')
+
+for hand in hands:
+    print(f"{'Right' if hand.is_right else 'Left'} hand  score={hand.score:.2f}")
+    print(f"  MANO pose  : {hand.mano_pose.shape}")   # (48,)
+    print(f"  MANO shape : {hand.mano_shape.shape}")  # (10,)
+    print(f"  Vertices   : {hand.vertices.shape}")    # (778, 3)
+    print(f"  Keypoints3D: {hand.keypoints_3d.shape}")# (21,  3)
+    print(f"  Keypoints2D: {hand.keypoints_2d.shape}")# (21,  2)  pixels
+    print(f"  Cam transl : {hand.cam_t}")             # (3,)
+
+# --- HaMeR backend ---
+predictor = AnyHandPredictor(backend='hamer')
+hands = predictor.predict('path/to/image.jpg')
+
+# --- Both at once (same bboxes, two sets of predictions) ---
+predictor = AnyHandPredictor(backend='both')
+hands = predictor.predict('path/to/image.jpg')
+# hands contains WiLoR predictions followed by HaMeR predictions;
+# hand.backend == 'wilor' or 'hamer' tells you which is which.
+
+# --- Batch of images ---
+import cv2
+imgs = [cv2.imread(p) for p in ['img1.jpg', 'img2.jpg']]
+batch_results = predictor.predict(imgs)   # List[List[HandPrediction]]
+
+# --- Override backend per call ---
+hands_w = predictor.predict(img, backend='wilor')
+hands_h = predictor.predict(img, backend='hamer')
+```
+
+**Custom checkpoint paths**
+
+```
+predictor = AnyHandPredictor(
+    backend      = 'wilor',
+    wilor_ckpt   = '/path/to/my.ckpt',
+    wilor_cfg    = '/path/to/model_config.yaml',
+    detector_pt  = '/path/to/detector.pt',
+    device       = 'cuda:0',
+    det_conf     = 0.4,    # YOLO detection confidence threshold
+    rescale_factor = 2.0,  # bbox padding factor
+    batch_size   = 32,
+)
+```
+
+**Command-line demo (WiLoR's original demo, with AnyHand checkpoint)**
+
+```
 python WiLoR/demo.py \
     --img_folder demo_img \
     --out_folder demo_out \
     --checkpoint pretrained_models/anyhand_wilor.ckpt \
-    --cfg pretrained_models/model_config.yaml \
+    --cfg        pretrained_models/model_config_wilor.yaml \
     --save_mesh
 ```
-
-#### Interactive Gradio demo
-
-```bash
-python WiLoR/gradio_demo.py \
-    --checkpoint pretrained_models/anyhand_wilor.ckpt \
-    --cfg pretrained_models/model_config.yaml
-```
-
-> **Note:** If the WiLoR scripts do not expose `--checkpoint` / `--cfg` flags, edit the `load_wilor(...)` call at the top of each script:
-> ```python
-> # Replace:
-> model, model_cfg = load_wilor(
->     checkpoint_path='./pretrained_models/wilor_final.ckpt',
->     cfg_path='./pretrained_models/model_config.yaml'
-> )
-> # With:
-> model, model_cfg = load_wilor(
->     checkpoint_path='../pretrained_models/anyhand_wilor.ckpt',
->     cfg_path='../pretrained_models/model_config.yaml'
-> )
-> ```
-
 ---
 
 ## Part 2 — RGB-D Hand Pose Estimation (AnyHandNet-D) 🔜
