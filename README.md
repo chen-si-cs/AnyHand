@@ -5,7 +5,7 @@
 <sup>1</sup>UC San Diego &emsp; <sup>2</sup>Lambda, Inc &emsp; <sup>3</sup>Imperial College London &emsp; <sup>4</sup>Nanyang Technological University
 
 <a href='https://chen-si-cs.github.io/projects/AnyHand'><img src='https://img.shields.io/badge/Project-Page-blue'></a>
-<a href='https://arxiv.org/abs/XXXX.XXXXX'><img src='https://img.shields.io/badge/Paper-arXiv-red'></a>
+<a href='https://arxiv.org/abs/2603.25726'><img src='https://img.shields.io/badge/Paper-arXiv-red'></a>
 <a href='https://huggingface.co/YOUR_HF_USERNAME/AnyHand'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Checkpoints-yellow'></a>
 <a href='https://huggingface.co/spaces/YOUR_HF_USERNAME/AnyHand'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Demo-orange'></a>
 <a href='https://colab.research.google.com/YOUR_COLAB_LINK'><img src='https://colab.research.google.com/assets/colab-badge.svg'></a>
