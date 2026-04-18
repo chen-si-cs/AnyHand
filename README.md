@@ -46,6 +46,18 @@ This repository releases **fine-tuned checkpoints of [HaMeR](https://arxiv.org/a
 
 ---
 
+---
+
+## 📬 Get Notified When New Components Drop
+
+The dataset, generation pipeline, and AnyHandNet-D are actively being prepared for release. If you'd like an email when each piece goes live (no spam, one message per release):
+
+👉 **[Sign up for release notifications](https://forms.gle/4hUHmTcLUERzr1cV8)**
+
+You can also **[⭐ star](https://github.com/chen-si-cs/AnyHand)** and **[👁 watch](https://github.com/chen-si-cs/AnyHand/subscription)** this repo (set "Custom → Releases") to get GitHub notifications instead.
+
+---
+
 ## Part 1 — RGB Hand Pose Estimation (HaMeR & WiLoR + AnyHand)
 
 We release improved checkpoints for both [HaMeR](https://github.com/geopavlakos/hamer) and [WiLoR](https://github.com/rolpotamias/WiLoR), co-trained with AnyHand. These are **drop-in replacements** for the original checkpoints — no architecture changes are needed.
