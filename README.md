@@ -17,9 +17,9 @@
 
 <a href='https://chen-si-cs.github.io/projects/AnyHand'><img src='https://img.shields.io/badge/Project-Page-blue'></a>
 <a href='https://arxiv.org/abs/2603.25726'><img src='https://img.shields.io/badge/Paper-arXiv-red'></a>
-<a href='https://huggingface.co/YOUR_HF_USERNAME/AnyHand'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Checkpoints-yellow'></a>
+<a href='https://huggingface.co/chen-si-02/AnyHand-Models'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Checkpoints-yellow'></a>
 <a href='https://huggingface.co/spaces/YOUR_HF_USERNAME/AnyHand'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Demo-orange'></a>
-<a href='https://colab.research.google.com/YOUR_COLAB_LINK'><img src='https://colab.research.google.com/assets/colab-badge.svg'></a>
+<a href='https://colab.research.google.com/drive/1O71DiPWzNlIflCVTViJeXp2VnfffHnTt'><img src='https://colab.research.google.com/assets/colab-badge.svg'></a>
 
 </div>
 
@@ -39,12 +39,10 @@ This repository releases **fine-tuned checkpoints of [HaMeR](https://arxiv.org/a
 
 | Component | Status |
 |---|---|
-| **Fine-tuned HaMeR & WiLoR checkpoints** + unified `AnyHandPredictor` | ✅ Released |
+| **Fine-tuned HaMeR & WiLoR checkpoints** + unified `AnyHandPredictor` | ✅ Released, Check [Colab Demo](https://colab.research.google.com/drive/1O71DiPWzNlIflCVTViJeXp2VnfffHnTt) |
 | **AnyHandNet-D**  | 🔜 Coming soon |
 | **AnyHand generation pipeline** | 🔜 Coming soon |
 | **AnyHand dataset** | 🔜 Coming soon |
-
----
 
 ---
 
@@ -89,8 +87,10 @@ conda activate anyhand
 Install PyTorch (adjust CUDA version — see [pytorch.org](https://pytorch.org/get-started/locally/)):
 
 ```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+pip install "torch<2.6" "torchvision<0.21" --index-url https://download.pytorch.org/whl/cu118
 ```
+
+> **Note:** The default checkpoint-loading logic in WiLoR and HaMeR relies on PyTorch's pre-2.6 `weight_only=True` behavior, so we pin `torch<2.6` for convenience. If you want to use a newer PyTorch, you can work around it on the application side (e.g. by patching the relevant `torch.load` calls).
 
 Then run the preparation scripts for whichever backend(s) you need:
 **WiLoR only** (recommended for most users):
@@ -116,12 +116,19 @@ AnyHand checkpoint, and prints a checklist of remaining manual steps.
 WiLoR requires the MANO hand model, which must be downloaded manually due to its license.
 
 1. Register and download from the [MANO website](https://mano.is.tue.mpg.de/)
-2. Unzip and place the right hand model at:
+2. Unzip and place the right hand model, alongside the `mano_mean_params.npz` file shipped under `scripts/mano_assets/`, at:
 
 ```
 AnyHand/
 └── mano_data/
-    └── MANO_RIGHT.pkl
+    ├── MANO_RIGHT.pkl
+    └── mano_mean_params.npz
+```
+
+`mano_mean_params.npz` is already included in this repo — just move it into `mano_data/`:
+
+```bash
+mv scripts/mano_assets/mano_mean_params.npz mano_data/
 ```
 
 > **Note:** By using MANO, you agree to the [MANO license terms](https://mano.is.tue.mpg.de/license.html).
@@ -145,10 +152,17 @@ pretrained_models/
 
 We provide `AnyHandPredictor`, a single class that wraps both models behind one consistent API. It always uses WiLoR's YOLO hand detector for bbox detection, then dispatches to whichever reconstruction backbone you choose.
 
+> **Headless rendering tip:** if you're running on a server or notebook without a display (e.g. Colab, a remote box), set `PYOPENGL_PLATFORM=egl` **before** importing — otherwise `pyrender` will fail to open a GL context.
+>
+> ```python
+> import os
+> os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
+> ```
+
 **Predict**
 
 ```python
-from anyhand import AnyHandPredictor
+from scripts.rgb_predictor import AnyHandPredictor
 
 # WiLoR backend (default)
 predictor = AnyHandPredictor(backend='wilor')
