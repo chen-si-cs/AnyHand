@@ -59,34 +59,8 @@ import torch
 _THIS_DIR  = Path(__file__).resolve().parent          # anyhand/
 _REPO_ROOT = _THIS_DIR.parent                         # AnyHand/
 
-LIGHT_GOLD = (0.42, 0.02, 0.50)
-
-from contextlib import contextmanager
-
-@contextmanager
-def _torch_load_trusted():
-    """
-    Temporarily force torch.load(weights_only=False).
-
-    PyTorch 2.6 flipped the default to True, which refuses to unpickle
-    arbitrary Python objects for safety. This breaks loaders that pickle
-    non-tensor objects:
-      - ultralytics' detector.pt pickles a full PoseModel.
-      - Lightning checkpoints often contain OmegaConf DictConfig in hparams.
-
-    We trust our own checkpoints (pinned HuggingFace repos). Use this
-    context manager around load calls that don't expose a weights_only kwarg
-    directly (e.g. ultralytics.YOLO).
-    """
-    orig = torch.load
-    def patched(*args, **kwargs):
-        kwargs.setdefault('weights_only', False)
-        return orig(*args, **kwargs)
-    torch.load = patched
-    try:
-        yield
-    finally:
-        torch.load = orig
+# Default mesh colour matching AnyHand's demo (light pink, float RGB in [0,1])
+_LIGHT_PINK = (0.42, 0.02, 0.50)
 
 
 # ===========================================================================
@@ -243,12 +217,7 @@ class AnyHandPredictor:
 
         _check_file(self._detector_pt,
                     "Hand detector not found. Run:  bash scripts/prepare_wilor.sh")
-
-        # ultralytics calls torch.load internally with no way to pass
-        # weights_only=False, so we monkey-patch torch.load for the duration
-        # of the constructor. See _torch_load_trusted() docstring.
-        with _torch_load_trusted():
-            self._detector = YOLO(self._detector_pt).to(self.device)
+        self._detector = YOLO(self._detector_pt).to(self.device)
 
     def _load_wilor(self) -> None:
         """Load the AnyHand-WiLoR model from the WiLoR submodule."""
@@ -270,15 +239,10 @@ class AnyHandPredictor:
         from wilor.models.wilor import WiLoR
 
         model_cfg = OmegaConf.load(self._wilor_cfg)
-
-        # Lightning's load_from_checkpoint exposes weights_only directly — use it.
-        # The checkpoint's hparams contain OmegaConf DictConfig objects, which
-        # weights_only=True refuses to unpickle on PyTorch 2.6+.
         model = WiLoR.load_from_checkpoint(
             self._wilor_ckpt,
             strict=False,
             cfg=model_cfg,
-            weights_only=False,
         )
         model = model.to(self.device)
         model.eval()
@@ -638,7 +602,7 @@ class AnyHandPredictor:
         self,
         image: Union[np.ndarray, str],
         hands: List[HandPrediction],
-        mesh_color: Tuple[float, float, float] = LIGHT_GOLD,
+        mesh_color: Tuple[float, float, float] = _LIGHT_PINK,
         bg_color: Tuple[float, float, float] = (1.0, 1.0, 1.0),
     ) -> np.ndarray:
         """
@@ -722,7 +686,7 @@ class AnyHandPredictor:
         hands: List[HandPrediction],
         out_dir: str,
         prefix: str = 'hand',
-        mesh_color: Tuple[float, float, float] = LIGHT_GOLD,
+        mesh_color: Tuple[float, float, float] = _LIGHT_PINK,
     ) -> List[str]:
         """
         Save each detected hand mesh as a separate .obj file.
