@@ -271,6 +271,13 @@ class AnyHandPredictor:
 
         from wilor.models.wilor import WiLoR
 
+        # Update config to be compatible with demo
+        if ('PRETRAINED_WEIGHTS' in self._wilor_model_cfg.MODEL.BACKBONE):
+            self._wilor_model_cfg.defrost()
+            self._wilor_model_cfg.MODEL.BACKBONE.pop('PRETRAINED_WEIGHTS')
+            self._wilor_model_cfg.freeze()
+
+
         # Load using the cfg embedded in the checkpoint's hparams.
         # This is self-describing and avoids a second source of truth (the
         # external YAML is redundant and has historically been error-prone).
