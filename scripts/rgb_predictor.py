@@ -48,6 +48,7 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Literal, Optional, Tuple, Union
+from contextlib import contextmanager
 
 import cv2
 import numpy as np
@@ -62,6 +63,36 @@ _REPO_ROOT = _THIS_DIR.parent                         # AnyHand/
 # Default mesh colour matching AnyHand's demo (light pink, float RGB in [0,1])
 _LIGHT_PINK = (0.42, 0.02, 0.50)
 
+
+
+@contextmanager
+def _torch_load_trusted():
+    """
+    Temporarily force torch.load(weights_only=False).
+
+    PyTorch 2.6 flipped the default to weights_only=True, which refuses to
+    unpickle arbitrary Python objects for safety. This breaks loaders that
+    pickle non-tensor objects — notably ultralytics' detector.pt, which
+    pickles a full PoseModel instance.
+
+    We trust our own checkpoints (pinned HuggingFace repos). Use this
+    context manager around load calls that do NOT expose a weights_only
+    kwarg directly (e.g. ultralytics.YOLO()).
+
+    For callers that do expose the kwarg (e.g. Lightning's
+    load_from_checkpoint), prefer passing weights_only=False explicitly.
+    """
+    orig = torch.load
+
+    def patched(*args, **kwargs):
+        kwargs.setdefault('weights_only', False)
+        return orig(*args, **kwargs)
+
+    torch.load = patched
+    try:
+        yield
+    finally:
+        torch.load = orig
 
 # ===========================================================================
 # Output dataclass
@@ -217,7 +248,12 @@ class AnyHandPredictor:
 
         _check_file(self._detector_pt,
                     "Hand detector not found. Run:  bash scripts/prepare_wilor.sh")
-        self._detector = YOLO(self._detector_pt).to(self.device)
+
+        # ultralytics calls torch.load internally with no way to pass
+        # weights_only=False, so we temporarily patch torch.load.
+        # See _torch_load_trusted() docstring.
+        with _torch_load_trusted():
+            self._detector = YOLO(self._detector_pt).to(self.device)
 
     def _load_wilor(self) -> None:
         """Load the AnyHand-WiLoR model from the WiLoR submodule."""
@@ -232,23 +268,26 @@ class AnyHandPredictor:
 
         _check_file(self._wilor_ckpt,
                     "WiLoR checkpoint not found. Run:  bash scripts/prepare_wilor.sh")
-        _check_file(self._wilor_cfg,
-                    "WiLoR model config not found. Run:  bash scripts/prepare_wilor.sh")
 
-        from omegaconf import OmegaConf
         from wilor.models.wilor import WiLoR
 
-        model_cfg = OmegaConf.load(self._wilor_cfg)
+        # Load using the cfg embedded in the checkpoint's hparams.
+        # This is self-describing and avoids a second source of truth (the
+        # external YAML is redundant and has historically been error-prone).
+        #
+        # weights_only=False is required because the hparams contain an
+        # OmegaConf DictConfig, which PyTorch 2.6+ refuses to unpickle under
+        # the new weights_only=True default.
         model = WiLoR.load_from_checkpoint(
             self._wilor_ckpt,
             strict=False,
-            cfg=model_cfg,
+            weights_only=False,
         )
         model = model.to(self.device)
         model.eval()
 
         self._wilor_model     = model
-        self._wilor_model_cfg = model_cfg
+        self._wilor_model_cfg = model.cfg   # expose the embedded cfg for downstream use
 
     def _load_hamer(self) -> None:
         """Load the AnyHand-HaMeR model from the HaMeR submodule."""
