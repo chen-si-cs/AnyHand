@@ -64,16 +64,12 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Install WiLoR Python package
+# 2. Install WiLoR Required Dependencies
 # ---------------------------------------------------------------------------
-info "=== [2/4] Installing WiLoR Python package ==="
+info "=== [2/4] Installing WiLoR Required Dependencies ==="
 
-if [ ! -f "WiLoR/setup.py" ] && [ ! -f "WiLoR/pyproject.toml" ]; then
-    die "WiLoR directory is empty. Check that the submodule was cloned correctly."
-fi
-
-pip install -q -e WiLoR/
-info "WiLoR installed."
+pip install -q -r WiLoR/requirements.txt
+info "WiLoR dependencies installed."
 
 # ---------------------------------------------------------------------------
 # 3. Download AnyHand WiLoR checkpoint + config

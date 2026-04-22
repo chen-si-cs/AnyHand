@@ -2,8 +2,8 @@
 
 <div align="center">
 
-[Chen Si](https://chen-si-cs.github.io)<sup>1</sup> &emsp;
-[Yulin Liu](https://liuyulinn.github.io/)<sup>1</sup> &emsp;
+[Chen Si *](https://chen-si-cs.github.io)<sup>1</sup> &emsp;
+[Yulin Liu *](https://liuyulinn.github.io/)<sup>1</sup> &emsp;
 [Bo Ai](https://albertboai.com/)<sup>1</sup> &emsp;
 [Jianwen Xie](http://www.stat.ucla.edu/~jxie/)<sup>2</sup> &emsp;
 [Rolandos Alexandros Potamias](https://rolpotamias.github.io)<sup>3</sup> &emsp;
