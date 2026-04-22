@@ -283,7 +283,7 @@ class AnyHandPredictor:
         from wilor.models import WiLoR, load_wilor
 
         model, cfg = load_wilor(checkpoint_path = self._wilor_ckpt, 
-                                cfg_path=self._wilor_model_cfg)
+                                cfg_path=self._wilor_cfg)
         model = model.to(self.device)
         model.eval()
 
