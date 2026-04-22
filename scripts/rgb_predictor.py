@@ -59,8 +59,34 @@ import torch
 _THIS_DIR  = Path(__file__).resolve().parent          # anyhand/
 _REPO_ROOT = _THIS_DIR.parent                         # AnyHand/
 
-# Default mesh colour matching WiLoR's demo (light purple, float RGB in [0,1])
-_LIGHT_PURPLE = (0.25098039, 0.274117647, 0.65882353)
+LIGHT_GOLD = (0.42, 0.02, 0.50)
+
+from contextlib import contextmanager
+
+@contextmanager
+def _torch_load_trusted():
+    """
+    Temporarily force torch.load(weights_only=False).
+
+    PyTorch 2.6 flipped the default to True, which refuses to unpickle
+    arbitrary Python objects for safety. This breaks loaders that pickle
+    non-tensor objects:
+      - ultralytics' detector.pt pickles a full PoseModel.
+      - Lightning checkpoints often contain OmegaConf DictConfig in hparams.
+
+    We trust our own checkpoints (pinned HuggingFace repos). Use this
+    context manager around load calls that don't expose a weights_only kwarg
+    directly (e.g. ultralytics.YOLO).
+    """
+    orig = torch.load
+    def patched(*args, **kwargs):
+        kwargs.setdefault('weights_only', False)
+        return orig(*args, **kwargs)
+    torch.load = patched
+    try:
+        yield
+    finally:
+        torch.load = orig
 
 
 # ===========================================================================
@@ -218,25 +244,11 @@ class AnyHandPredictor:
         _check_file(self._detector_pt,
                     "Hand detector not found. Run:  bash scripts/prepare_wilor.sh")
 
-        # --- PyTorch 2.6+ compatibility ---------------------------------------
-        # Since PyTorch 2.6, torch.load defaults to weights_only=True, which
-        # refuses to unpickle arbitrary classes. Ultralytics' detector.pt is a
-        # full pickled PoseModel (not a bare state dict), so the new default
-        # raises UnpicklingError. We trust this checkpoint (downloaded from
-        # WiLoR's official HuggingFace space) and load it with weights_only=False.
-        #
-        # We monkey-patch torch.load for the duration of the YOLO constructor
-        # because ultralytics calls torch.load internally, two stack frames deep.
-        _orig_torch_load = torch.load
-        def _torch_load_legacy(*args, **kwargs):
-            kwargs.setdefault('weights_only', False)
-            return _orig_torch_load(*args, **kwargs)
-
-        torch.load = _torch_load_legacy
-        try:
+        # ultralytics calls torch.load internally with no way to pass
+        # weights_only=False, so we monkey-patch torch.load for the duration
+        # of the constructor. See _torch_load_trusted() docstring.
+        with _torch_load_trusted():
             self._detector = YOLO(self._detector_pt).to(self.device)
-        finally:
-            torch.load = _orig_torch_load
 
     def _load_wilor(self) -> None:
         """Load the AnyHand-WiLoR model from the WiLoR submodule."""
@@ -258,10 +270,15 @@ class AnyHandPredictor:
         from wilor.models.wilor import WiLoR
 
         model_cfg = OmegaConf.load(self._wilor_cfg)
+
+        # Lightning's load_from_checkpoint exposes weights_only directly — use it.
+        # The checkpoint's hparams contain OmegaConf DictConfig objects, which
+        # weights_only=True refuses to unpickle on PyTorch 2.6+.
         model = WiLoR.load_from_checkpoint(
             self._wilor_ckpt,
             strict=False,
             cfg=model_cfg,
+            weights_only=False,
         )
         model = model.to(self.device)
         model.eval()
@@ -621,7 +638,7 @@ class AnyHandPredictor:
         self,
         image: Union[np.ndarray, str],
         hands: List[HandPrediction],
-        mesh_color: Tuple[float, float, float] = _LIGHT_PURPLE,
+        mesh_color: Tuple[float, float, float] = LIGHT_GOLD,
         bg_color: Tuple[float, float, float] = (1.0, 1.0, 1.0),
     ) -> np.ndarray:
         """
@@ -705,7 +722,7 @@ class AnyHandPredictor:
         hands: List[HandPrediction],
         out_dir: str,
         prefix: str = 'hand',
-        mesh_color: Tuple[float, float, float] = _LIGHT_PURPLE,
+        mesh_color: Tuple[float, float, float] = LIGHT_GOLD,
     ) -> List[str]:
         """
         Save each detected hand mesh as a separate .obj file.
