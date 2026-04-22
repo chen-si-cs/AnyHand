@@ -71,10 +71,19 @@ info "=== [2/4] Installing WiLoR Required Dependencies ==="
 pip install -q -r WiLoR/requirements.txt
 info "WiLoR dependencies installed."
 
+
 # ---------------------------------------------------------------------------
-# 3. Download AnyHand WiLoR checkpoint + config
+# 3. Download WiLoR hand detector
 # ---------------------------------------------------------------------------
-info "=== [3/4] Downloading AnyHand WiLoR checkpoint ==="
+info "=== [3/4] Downloading WiLoR hand detector ==="
+
+WILOR_HF="https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main/pretrained_models"
+download "${WILOR_HF}/detector.pt" "pretrained_models/detector.pt"
+
+# ---------------------------------------------------------------------------
+# 4. Download AnyHand WiLoR checkpoint + config
+# ---------------------------------------------------------------------------
+info "=== [4/4] Downloading AnyHand WiLoR checkpoint ==="
 
 mkdir -p pretrained_models
 
@@ -90,13 +99,6 @@ else
     download "${HF_BASE}/model_config_wilor.yaml"     "pretrained_models/model_config_wilor.yaml"
 fi
 
-# ---------------------------------------------------------------------------
-# 4. Download WiLoR hand detector
-# ---------------------------------------------------------------------------
-info "=== [4/4] Downloading WiLoR hand detector ==="
-
-WILOR_HF="https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main/pretrained_models"
-download "${WILOR_HF}/detector.pt" "pretrained_models/detector.pt"
 
 # ---------------------------------------------------------------------------
 # Done
