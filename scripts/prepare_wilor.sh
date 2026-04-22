@@ -77,6 +77,8 @@ info "WiLoR dependencies installed."
 # ---------------------------------------------------------------------------
 info "=== [3/4] Downloading WiLoR hand detector ==="
 
+mkdir -p pretrained_models
+
 WILOR_HF="https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main/pretrained_models"
 download "${WILOR_HF}/detector.pt" "pretrained_models/detector.pt"
 
@@ -85,7 +87,6 @@ download "${WILOR_HF}/detector.pt" "pretrained_models/detector.pt"
 # ---------------------------------------------------------------------------
 info "=== [4/4] Downloading AnyHand WiLoR checkpoint ==="
 
-mkdir -p pretrained_models
 
 HF_USER="chen-si-02"
 HF_REPO="AnyHand-Models"
