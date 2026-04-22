@@ -217,7 +217,26 @@ class AnyHandPredictor:
 
         _check_file(self._detector_pt,
                     "Hand detector not found. Run:  bash scripts/prepare_wilor.sh")
-        self._detector = YOLO(self._detector_pt).to(self.device)
+
+        # --- PyTorch 2.6+ compatibility ---------------------------------------
+        # Since PyTorch 2.6, torch.load defaults to weights_only=True, which
+        # refuses to unpickle arbitrary classes. Ultralytics' detector.pt is a
+        # full pickled PoseModel (not a bare state dict), so the new default
+        # raises UnpicklingError. We trust this checkpoint (downloaded from
+        # WiLoR's official HuggingFace space) and load it with weights_only=False.
+        #
+        # We monkey-patch torch.load for the duration of the YOLO constructor
+        # because ultralytics calls torch.load internally, two stack frames deep.
+        _orig_torch_load = torch.load
+        def _torch_load_legacy(*args, **kwargs):
+            kwargs.setdefault('weights_only', False)
+            return _orig_torch_load(*args, **kwargs)
+
+        torch.load = _torch_load_legacy
+        try:
+            self._detector = YOLO(self._detector_pt).to(self.device)
+        finally:
+            torch.load = _orig_torch_load
 
     def _load_wilor(self) -> None:
         """Load the AnyHand-WiLoR model from the WiLoR submodule."""
