@@ -279,16 +279,16 @@ class AnyHandPredictor:
         # weights_only=False is required because the hparams contain an
         # OmegaConf DictConfig, which PyTorch 2.6+ refuses to unpickle under
         # the new weights_only=True default.
-        model = WiLoR.load_from_checkpoint(
-            self._wilor_ckpt,
-            strict=False,
-            weights_only=False,
-        )
+
+        from wilor.models import WiLoR, load_wilor
+
+        model, cfg = load_wilor(checkpoint_path = self._wilor_ckpt, 
+                                cfg_path=self._wilor_model_cfg)
         model = model.to(self.device)
         model.eval()
 
         self._wilor_model     = model
-        self._wilor_model_cfg = model.cfg   # expose the embedded cfg for downstream use
+        self._wilor_model_cfg = cfg
 
     def _load_hamer(self) -> None:
         """Load the AnyHand-HaMeR model from the HaMeR submodule."""
