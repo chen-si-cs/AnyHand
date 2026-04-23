@@ -8,7 +8,7 @@
 [Jianwen Xie](http://www.stat.ucla.edu/~jxie/)<sup>2</sup> &emsp;
 [Rolandos Alexandros Potamias](https://rolpotamias.github.io)<sup>3</sup> &emsp;
 [Chuanxia Zheng](https://physicalvision.github.io/people/~chuanxia)<sup>4</sup> &emsp;
-[Hao Su](https://cseweb.ucsd.edu/~haosu/)<sup>1</sup>
+[Hao Su](https://scholar.google.com/citations?user=1P8Zu04AAAAJ)<sup>1</sup>
 
 <sup>1</sup>UC San Diego &emsp;
 <sup>2</sup>Lambda, Inc &emsp;
