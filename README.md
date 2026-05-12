@@ -18,7 +18,7 @@
 <a href='https://chen-si-cs.github.io/projects/AnyHand'><img src='https://img.shields.io/badge/Project-Page-blue'></a>
 <a href='https://arxiv.org/abs/2603.25726'><img src='https://img.shields.io/badge/Paper-arXiv-red'></a>
 <a href='https://huggingface.co/chen-si-02/AnyHand-Models'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Checkpoints-yellow'></a>
-<a href='https://huggingface.co/spaces/YOUR_HF_USERNAME/AnyHand'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Demo-orange'></a>
+<a href='https://huggingface.co/spaces/chen-si-02/AnyHand-demo'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Demo-orange'></a>
 <a href='https://colab.research.google.com/drive/1O71DiPWzNlIflCVTViJeXp2VnfffHnTt'><img src='https://colab.research.google.com/assets/colab-badge.svg'></a>
 
 </div>
