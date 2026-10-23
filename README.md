@@ -33,6 +33,8 @@
 
 This repository releases **fine-tuned checkpoints of [HaMeR](https://arxiv.org/abs/2312.05251) and [WiLoR](https://arxiv.org/abs/2409.12259) co-trained with AnyHand**, which achieve consistent improvements on standard benchmarks (FreiHAND, HO-3D) and better generalization to out-of-domain scenes. More components are coming — see the roadmap below.
 
+The **[AnyHand dataset](https://huggingface.co/datasets/chen-si-02/AnyHand-Dataset)** is now available on Hugging Face. The toolkit and generation pipeline will be released later.
+
 ---
 
 ## 🗺️ Roadmap
@@ -42,13 +44,13 @@ This repository releases **fine-tuned checkpoints of [HaMeR](https://arxiv.org/a
 | **Fine-tuned HaMeR & WiLoR checkpoints** + unified `AnyHandPredictor` | ✅ Released, Check [Colab Demo](https://colab.research.google.com/drive/1O71DiPWzNlIflCVTViJeXp2VnfffHnTt) |
 | **AnyHandNet-D**  | 🔜 Coming soon |
 | **AnyHand generation pipeline** | 🔜 Coming soon |
-| **AnyHand dataset** | 🔜 Coming soon |
+| **AnyHand dataset** | ✅ Released on [Hugging Face](https://huggingface.co/datasets/chen-si-02/AnyHand-Dataset) |
 
 ---
 
 ## 📬 Get Notified When New Components Drop
 
-The dataset, generation pipeline, and AnyHandNet-D are actively being prepared for release. If you'd like an email when each piece goes live (no spam, one message per release):
+The toolkit, generation pipeline, and AnyHandNet-D are actively being prepared for release. If you'd like an email when each piece goes live (no spam, one message per release):
 
 👉 **[Sign up for release notifications](https://forms.gle/4hUHmTcLUERzr1cV8)**
 
@@ -277,9 +279,9 @@ python WiLoR/demo.py \
 
 ---
 
-## Part 4 — AnyHand Dataset 🔜
+## Part 4 — AnyHand Dataset
 
-> **Coming soon.** 
+The dataset is now available on **[Hugging Face](https://huggingface.co/datasets/chen-si-02/AnyHand-Dataset)**.
 
 ---
 
