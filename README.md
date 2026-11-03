@@ -35,6 +35,8 @@ This repository releases **fine-tuned checkpoints of [HaMeR](https://arxiv.org/a
 
 The **[AnyHand dataset](https://huggingface.co/datasets/chen-si-02/AnyHand-Dataset)** is now available on Hugging Face. Here's the [**toolkit**](https://github.com/chen-si-cs/anyhand-toolkit).
 
+The **[synthetic data generation pipeline](https://github.com/chen-si-cs/AnyHand-Generation)** is also available, with code for generating hand-only and hand-object RGB-D data.
+
 ---
 
 ## 🗺️ Roadmap
@@ -44,6 +46,7 @@ The **[AnyHand dataset](https://huggingface.co/datasets/chen-si-02/AnyHand-Datas
 | **Fine-tuned HaMeR & WiLoR checkpoints** + unified `AnyHandPredictor` | ✅ Released, Check [Colab Demo](https://colab.research.google.com/drive/1O71DiPWzNlIflCVTViJeXp2VnfffHnTt) |
 | **AnyHand dataset** | ✅ Released on [Hugging Face](https://huggingface.co/datasets/chen-si-02/AnyHand-Dataset) |
 | **AnyHand toolkit** | ✅ Released on [GitHub](https://github.com/chen-si-cs/anyhand-toolkit) |
+| **Synthetic data generation pipeline** | ✅ Released on [GitHub](https://github.com/chen-si-cs/AnyHand-Generation) |
 
 ---
 
